@@ -9,6 +9,76 @@ This project implements a simple **Recurrent Neural Network (RNN)** from scratch
 2. **Core C++ concepts** - heavily commented code explains the language features
 3. **Matrix/Vector operations** - fundamental building blocks of neural networks
 
+## RNN Workflow Overview
+
+```mermaid
+flowchart TB
+    subgraph INPUT["📥 INPUT"]
+        xt["x_t<br/>Word Embedding<br/>(current word)"]
+    end
+
+    subgraph MEMORY["🧠 MEMORY (Recurrence)"]
+        ht_prev["h_{t-1}<br/>Previous Hidden State<br/>(memory from past)"]
+    end
+
+    subgraph WEIGHTS["⚖️ WEIGHT MATRICES"]
+        W["W<br/>Input Weights"]
+        U["U<br/>Hidden Weights"]
+        V["V<br/>Output Weights"]
+    end
+
+    subgraph COMPUTATION["🔧 CORE COMPUTATION"]
+        Wx["W × x_t"]
+        Uh["U × h_{t-1}"]
+        sum["➕ Add<br/>W·x_t + U·h_{t-1} + b"]
+        relu["⚡ ReLU<br/>f(x) = max(0, x)"]
+    end
+
+    subgraph HIDDEN["💾 NEW HIDDEN STATE"]
+        ht["h_t<br/>Current Hidden State<br/>(updated memory)"]
+    end
+
+    subgraph OUTPUT_CALC["📊 OUTPUT CALCULATION"]
+        Vh["V × h_t"]
+        softmax["📈 Softmax<br/>Convert to probabilities"]
+    end
+
+    subgraph OUTPUT["📤 OUTPUT"]
+        yt["y_t<br/>Probability Distribution<br/>(next word prediction)"]
+    end
+
+    %% Input flows
+    xt --> W
+    W --> Wx
+    
+    ht_prev --> U
+    U --> Uh
+    
+    %% Computation flow
+    Wx --> sum
+    Uh --> sum
+    sum --> relu
+    relu --> ht
+    
+    %% Output flow
+    ht --> V
+    V --> Vh
+    Vh --> softmax
+    softmax --> yt
+    
+    %% Recurrence loop
+    ht -.->|"Next time step"| ht_prev
+
+    %% Styling
+    style INPUT fill:#e1f5fe,stroke:#01579b
+    style MEMORY fill:#fff3e0,stroke:#e65100
+    style WEIGHTS fill:#f3e5f5,stroke:#7b1fa2
+    style COMPUTATION fill:#e8f5e9,stroke:#2e7d32
+    style HIDDEN fill:#fce4ec,stroke:#c2185b
+    style OUTPUT_CALC fill:#e0f2f1,stroke:#00695c
+    style OUTPUT fill:#e8eaf6,stroke:#283593
+```
+
 ## The RNN Formula
 
 Based on the classic RNN equations from your notes:
