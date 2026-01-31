@@ -69,17 +69,14 @@ flowchart TB
     %% Recurrence loop
     ht -.->|"Next time step"| ht_prev
 
-    %% Styling with explicit dark text color for visibility
-    style INPUT fill:#e1f5fe,stroke:#01579b,color:#01579b
-    style MEMORY fill:#fff3e0,stroke:#e65100,color:#e65100
-    style WEIGHTS fill:#f3e5f5,stroke:#7b1fa2,color:#4a148c
-    style COMPUTATION fill:#e8f5e9,stroke:#2e7d32,color:#1b5e20
-    style HIDDEN fill:#fce4ec,stroke:#c2185b,color:#880e4f
-    style OUTPUT_CALC fill:#e0f2f1,stroke:#00695c,color:#004d40
-    style OUTPUT fill:#e8eaf6,stroke:#283593,color:#1a237e
-
-    %% Global Node Text Color
-    classDef default color:#333,stroke-width:2px;
+    %% Styling
+    style INPUT fill:#e1f5fe,stroke:#01579b
+    style MEMORY fill:#fff3e0,stroke:#e65100
+    style WEIGHTS fill:#f3e5f5,stroke:#7b1fa2
+    style COMPUTATION fill:#e8f5e9,stroke:#2e7d32
+    style HIDDEN fill:#fce4ec,stroke:#c2185b
+    style OUTPUT_CALC fill:#e0f2f1,stroke:#00695c
+    style OUTPUT fill:#e8eaf6,stroke:#283593
 ```
 
 ## The RNN Formula
