@@ -1,6 +1,6 @@
 # Recurrent Neural Network (RNN) - Educational Implementation in C++
 
-## Overview
+## Overview (Special Thanks to Claude in helping clean up my horribly messy code and documentation!!)
 
 This project implements a simple **Recurrent Neural Network (RNN)** from scratch in C++. It's designed to help you understand:
 
