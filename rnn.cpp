@@ -198,6 +198,21 @@ RNN::RNN(int inputSize, int hiddenSize, int outputSize, const std::string& outpu
     std::cout << "c vector (output bias): " << outputSize << std::endl;
     saveStepVector("00_c_bias_output", c);
     
+    std::cout << "\n--- Initializing Embedding Matrix ---" << std::endl;
+
+    // E: Embedding matrix [outputSize x inputSize]
+    // Each row is one word's embedding vector
+    // When we want x_t for word index 3, we grab row 3 of this matrix
+    // 
+    // In real systems, embeddings are pre-trained (Word2Vec, GloVe)
+    // or learned during training. We use random values here.
+    E = initializeMatrix(outputSize, inputSize);
+    std::cout << "E matrix (word embeddings): " << outputSize << " x " << inputSize << std::endl;
+    std::cout << "  Row 0 = embedding for word 0" << std::endl;
+    std::cout << "  Row 1 = embedding for word 1" << std::endl;
+    std::cout << "  ...and so on" << std::endl;
+    saveStepMatrix("00_E_embedding_matrix", E);
+
     // Initialize hidden state to zeros
     // This is the "memory" at time t=0 (no memory yet)
     hiddenState = initializeVector(hiddenSize);
@@ -515,4 +530,257 @@ void RNN::saveStepVector(const std::string& stepName, const Vector& data) {
 void RNN::saveStepMatrix(const std::string& stepName, const Matrix& data) {
     std::string filename = outputDir + "/" + stepName + ".csv";
     saveMatrixToCSV(data, filename, stepName);
+}
+
+// =============================================================================
+// WORD SELECTION FROM PROBABILITY DISTRIBUTION
+// =============================================================================
+
+/**
+ * Pick a word index from softmax output
+ *
+ * GREEDY (argmax):
+ *   Simply pick whichever word has the highest probability.
+ *   Deterministic - same input always gives same output.
+ *   Pro: Predictable. Con: Boring, repetitive.
+ *
+ * SAMPLING:
+ *   Treat the probabilities as a weighted random choice.
+ *   Imagine a spinner wheel where each word gets a slice
+ *   proportional to its probability.
+ *   Pro: Variety. Con: Can pick unlikely words.
+ *
+ * Example with probs = [0.1, 0.6, 0.3]:
+ *   Greedy always picks index 1 (0.6)
+ *   Sampling picks index 1 ~60% of the time, index 2 ~30%, index 0 ~10%
+ */
+int pickWordFromDistribution(const Vector& probs, bool greedy, std::mt19937& rng) {
+    if (greedy) {
+        // Argmax: find the index of the largest value
+        int bestIndex = 0;
+        double bestProb = probs[0];
+
+        for (size_t i = 1; i < probs.size(); ++i) {
+            if (probs[i] > bestProb) {
+                bestProb = probs[i];
+                bestIndex = static_cast<int>(i);
+            }
+        }
+        return bestIndex;
+    }
+    else {
+        // Sampling: generate a random number in [0, 1)
+        // then walk through the probabilities until we exceed it
+        // 
+        // Visual example with probs [0.1, 0.6, 0.3]:
+        //   random = 0.35
+        //   cumulative: 0.1 (not yet) -> 0.7 (exceeded!) -> pick index 1
+
+        std::uniform_real_distribution<double> uniform(0.0, 1.0);
+        double random = uniform(rng);
+        double cumulative = 0.0;
+
+        for (size_t i = 0; i < probs.size(); ++i) {
+            cumulative += probs[i];
+            if (random < cumulative) {
+                return static_cast<int>(i);
+            }
+        }
+
+        // Fallback (shouldn't reach here if probs sum to 1)
+        return static_cast<int>(probs.size() - 1);
+    }
+}
+
+// =============================================================================
+// EMBEDDING LOOKUP
+// =============================================================================
+
+/**
+ * Look up a word's embedding vector from the embedding matrix
+ *
+ * This is literally just grabbing a row from the matrix.
+ * If wordIndex is 3, we return row 3 of the embedding matrix E.
+ *
+ * This is how word index -> x_t works:
+ *   softmax output -> pick word index -> E[index] -> x_t for next step
+ */
+Vector RNN::getEmbedding(int wordIndex) const {
+    // Bounds checking - make sure the word index is valid
+    if (wordIndex < 0 || wordIndex >= static_cast<int>(E.size())) {
+        std::cerr << "Error: Word index " << wordIndex
+            << " out of range [0, " << E.size() - 1 << "]" << std::endl;
+        return Vector(inputSize, 0.0);
+    }
+
+    // Just return that row of the embedding matrix
+    // E[wordIndex] is a Vector of size inputSize
+    return E[wordIndex];
+}
+
+// =============================================================================
+// AUTOREGRESSIVE GENERATION  (fully traced to CSV)
+// =============================================================================
+
+/**
+ * Generate a sequence of words autoregressively
+ *
+ * This is the full loop that connects everything:
+ *
+ *   start word index
+ *        |
+ *        v
+ *   [Embedding Lookup] --> x_t
+ *        |
+ *        v
+ *   [Forward Pass] --> y_t (probabilities)
+ *        |
+ *        v
+ *   [Pick Word] --> next word index
+ *        |
+ *        v
+ *   [Embedding Lookup] --> x_{t+1}
+ *        |
+ *        v
+ *   [Forward Pass] --> y_{t+1}
+ *        |
+ *       ...continues...
+ *
+ * The key insight: the output feeds BACK as the input through
+ * the embedding lookup table. That's what makes it "generative".
+ *
+ * CSV TRACING:
+ *   For every generation step the following files are produced
+ *   (the forward pass files plus an extra _11_selected_word file):
+ *
+ *     NN_1_input_x_t.csv           -- x_t (should match row of 00_E)
+ *     NN_2_prev_hidden_h_t-1.csv   -- h_{t-1}
+ *     NN_3_W_times_x.csv           -- W * x_t
+ *     NN_4_U_times_h.csv           -- U * h_{t-1}
+ *     NN_5_Wx_plus_Uh.csv          -- sum
+ *     NN_6_pre_activation.csv      -- + b
+ *     NN_7_hidden_state_h_t.csv    -- ReLU => h_t
+ *     NN_8_V_times_h.csv           -- V * h_t
+ *     NN_9_logits.csv              -- + c
+ *     NN_10_output_y_t.csv         -- softmax => y_t
+ *     NN_11_selected_word.csv      -- chosen index, prob, and its embedding
+ */
+std::vector<int> RNN::generate(int startWordIndex, int length) {
+    std::cout << "\n╔══════════════════════════════════════════════════════════╗" << std::endl;
+    std::cout << "║  AUTOREGRESSIVE GENERATION                               ║" << std::endl;
+    std::cout << "║  softmax -> pick word -> embedding lookup -> next input   ║" << std::endl;
+    std::cout << "╚══════════════════════════════════════════════════════════╝\n" << std::endl;
+
+    // Reset hidden state for a fresh sequence
+    resetHiddenState();
+
+    // Reset step counter so CSV numbering starts at 01
+    stepCounter = 0;
+
+    // Store the sequence of generated word indices
+    std::vector<int> generatedSequence;
+    generatedSequence.push_back(startWordIndex);
+
+    // The current word index - starts with the seed word
+    int currentWordIndex = startWordIndex;
+
+    std::cout << "Starting word index: " << startWordIndex << std::endl;
+    std::cout << "Generating " << length << " words...\n" << std::endl;
+
+    for (int t = 0; t < length; ++t) {
+        std::cout << "\n╔════════════════════════════════════════════════════════╗" << std::endl;
+        std::cout << "║  GENERATION STEP " << t + 1 << "                                      ║" << std::endl;
+        std::cout << "╚════════════════════════════════════════════════════════╝" << std::endl;
+
+        // =====================================================
+        // STEP A: Embedding lookup (word index -> vector)
+        // This is the connection: previous output -> current input
+        // =====================================================
+        std::cout << "\n[A] Embedding lookup: word index " << currentWordIndex
+            << " -> row " << currentWordIndex << " of E" << std::endl;
+
+        Vector x_t = getEmbedding(currentWordIndex);
+        printVector(x_t, "x_t = E[" + std::to_string(currentWordIndex) + "]");
+
+        // =====================================================
+        // STEP B: Forward pass (x_t -> y_t)
+        // forward() increments stepCounter and writes all the
+        // sub-step CSV files (NN_1 through NN_10)
+        // =====================================================
+        std::cout << "\n[B] Running forward pass..." << std::endl;
+        Vector y_t = forward(x_t);
+
+        // =====================================================
+        // STEP C: Pick next word from probabilities (greedy)
+        // =====================================================
+        std::cout << "\n[C] Picking next word from softmax output (greedy argmax)..." << std::endl;
+
+        int nextWordIndex = pickWordFromDistribution(y_t, true, rng);
+
+        std::cout << "  Selected word index: " << nextWordIndex
+            << " (probability: " << std::fixed << std::setprecision(4)
+            << y_t[nextWordIndex] << ")" << std::endl;
+
+        // =====================================================
+        // STEP D: Save the selection to a CSV for traceability
+        //
+        // This file records:
+        //   - Which word index was selected
+        //   - Its probability from y_t
+        //   - The full probability distribution
+        //   - The embedding vector that will become the NEXT x_t
+        // =====================================================
+        {
+            std::string prefix = std::to_string(stepCounter);
+            if (stepCounter < 10) prefix = "0" + prefix;
+
+            std::string filename = outputDir + "/" + prefix + "_11_selected_word.csv";
+            std::ofstream file(filename);
+            if (file.is_open()) {
+                file << "selected_word_index," << nextWordIndex << std::endl;
+                file << "selected_probability," << std::fixed << std::setprecision(6)
+                     << y_t[nextWordIndex] << std::endl;
+
+                file << std::endl;
+                file << "--- full y_t distribution ---" << std::endl;
+                for (size_t i = 0; i < y_t.size(); ++i) {
+                    file << "y_t[" << i << "]," << y_t[i];
+                    if (static_cast<int>(i) == nextWordIndex) file << ",<-- selected";
+                    file << std::endl;
+                }
+
+                file << std::endl;
+                file << "--- embedding for selected word (will become next x_t) ---" << std::endl;
+                Vector nextEmb = getEmbedding(nextWordIndex);
+                for (size_t i = 0; i < nextEmb.size(); ++i) {
+                    file << "E[" << nextWordIndex << "][" << i << "]," << nextEmb[i] << std::endl;
+                }
+
+                file.close();
+                std::cout << "  -> Saved selection to: " << filename << std::endl;
+            }
+        }
+
+        // =====================================================
+        // STEP E: Feed back — this word becomes the next input
+        // =====================================================
+        std::cout << "\n[E] Word " << nextWordIndex
+            << " will be fed back as input for next step." << std::endl;
+        std::cout << "    Next x_t = E[" << nextWordIndex << "]" << std::endl;
+
+        currentWordIndex = nextWordIndex;
+        generatedSequence.push_back(currentWordIndex);
+    }
+
+    // Print the full generated sequence
+    std::cout << "\n════════════════════════════════════" << std::endl;
+    std::cout << "Generated sequence of word indices: [ ";
+    for (size_t i = 0; i < generatedSequence.size(); ++i) {
+        std::cout << generatedSequence[i];
+        if (i < generatedSequence.size() - 1) std::cout << " -> ";
+    }
+    std::cout << " ]" << std::endl;
+    std::cout << "════════════════════════════════════\n" << std::endl;
+
+    return generatedSequence;
 }

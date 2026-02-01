@@ -88,6 +88,20 @@ void printVector(const Vector& vec, const std::string& name);
  */
 void printMatrix(const Matrix& mat, const std::string& name);
 
+/**
+ * Pick a word index from a probability distribution
+ *
+ * Two strategies:
+ *   - Greedy (argmax): always pick the highest probability
+ *   - Sampling: randomly pick based on probabilities (more variety)
+ *
+ * @param probs      Probability distribution from softmax
+ * @param greedy     If true, pick highest. If false, sample.
+ * @param rng        Random number generator (for sampling)
+ * @return           Chosen word index
+ */
+int pickWordFromDistribution(const Vector& probs, bool greedy, std::mt19937& rng);
+
 // -----------------------------------------------------------------------------
 // RNN CLASS DEFINITION
 // -----------------------------------------------------------------------------
@@ -139,6 +153,11 @@ private:
     // Output directory for CSV files
     std::string outputDir;
 
+    // Embedding matrix: each row is a word's vector representation
+    // This is the lookup table that converts word index -> x_t vector
+    // Shape: [vocabularySize x inputSize]
+    Matrix E;
+
 // -----------------------------------------------------------------------------
 // PUBLIC MEMBERS (accessible from outside the class)
 // -----------------------------------------------------------------------------
@@ -160,7 +179,7 @@ public:
     /**
      * Forward pass - Process one input through the network
      * 
-     * This implements: h_t = f(W * x_t + U * h_{t-1} + b)
+     * This implements: h_t = ReLU(W * x_t + U * h_{t-1} + b)
      *             and: y_t = softmax(V * h_t + c)
      * 
      * @param input  The input vector x_t
@@ -189,6 +208,29 @@ public:
     Matrix getV() const { return V; }
     Vector getB() const { return b; }
     Vector getC() const { return c; }
+
+    /**
+     * Generate a sequence autoregressively
+     *
+     * This is the complete loop:
+     *   word index -> E[index] -> forward() -> y_t -> pick word -> repeat
+     *
+     * Every intermediate value is saved to CSV for tracing.
+     *
+     * @param startWordIndex  Index of the first word to feed in
+     * @param length          How many words to generate
+     * @return                Vector of predicted word indices
+     */
+    std::vector<int> generate(int startWordIndex, int length);
+
+    /**
+     * Get the embedding vector for a word by its index
+     * Looks up row 'wordIndex' in the embedding matrix
+     *
+     * @param wordIndex  Which word to look up
+     * @return           The embedding vector for that word
+     */
+    Vector getEmbedding(int wordIndex) const;
 
 // -----------------------------------------------------------------------------
 // PRIVATE HELPER FUNCTIONS
