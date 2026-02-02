@@ -113,27 +113,6 @@ rnn_project/
 └── output/         # CSV files generated when you run (auto-created)
 ```
 
-## Quick Start
-
-### Build and Run
-
-```bash
-# Compile the project
-make
-
-# Run the demo
-./rnn_demo
-
-# Or do both in one command
-make run
-```
-
-### Clean Up
-
-```bash
-make clean
-```
-
 ## Understanding the Output
 
 When you run the program, it shows every computation:
